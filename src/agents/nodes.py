@@ -4,10 +4,9 @@ import logging
 from typing import Dict, Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-
 from src.config import settings
 from src.agents.state import AgentState
-from src.prompts import MAKER_PROMPT, CHECKER_PROMPT, PLANNER_PROMPT
+from src.prompts import MAKER_PROMPT, CHECKER_PROMPT, PLANNER_PROMPT_WITH_HISTORY
 from src.tools.retriever import SearchTool
 from src.tools.web_search import WebSearchTool
 
@@ -21,20 +20,33 @@ llm = ChatGoogleGenerativeAI(
 )
 
 def planner_node(state: AgentState) -> Dict[str, Any]:
-    """Break down complex queries."""
+    """Break down complex queries or handle chat history."""
     logger.info("Planner: Analyzing query...")
     
-    # If we already have a plan or it's a follow-up, we might skip logic
-    # But for now, let's just plan every time
+    query = state["query"]
+    messages = state.get("messages", [])
     
-    chain = PLANNER_PROMPT | llm
-    response = chain.invoke({"query": state["query"]})
+    # 1. Format History (Safe handling)
+    # We take previous messages (excluding the current query which is the last one)
+    previous_messages = messages[:-1] if len(messages) > 0 else []
+    
+    if previous_messages:
+        # Take last 5 messages for context
+        history_str = "\n".join([f"{m.type.upper()}: {m.content}" for m in previous_messages[-5:]])
+    else:
+        history_str = "No previous conversation history."
+    
+    # 3. Invoke LLM
+    chain = PLANNER_PROMPT_WITH_HISTORY | llm
+    response = chain.invoke({
+        "query": query,
+        "history": history_str
+    })
     
     plan = response.content
-    logger.info(f"Plan generated: {plan}")
-    
-    # We don't overwrite messages here, just update the 'plan' state
     return {"plan": plan}
+
+
 
 def retrieval_node(state: AgentState) -> Dict[str, Any]:
     """
