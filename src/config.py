@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     
     # API Keys
     google_api_key: str
+    google_cse_id: str = ""  # For web search fallback
+    google_search_api_key: str = ""  # For web search fallback
     
     # Model Configuration
     gemini_model: str = "gemini-2.5-flash"
