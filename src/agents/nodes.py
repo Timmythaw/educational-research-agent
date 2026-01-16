@@ -7,7 +7,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from src.config import settings
 from src.agents.state import AgentState
-from src.prompts import MAKER_PROMPT, CHECKER_PROMPT
+from src.prompts import MAKER_PROMPT, CHECKER_PROMPT, PLANNER_PROMPT
 from src.tools.retriever import SearchTool
 from src.tools.web_search import WebSearchTool
 
@@ -20,18 +20,37 @@ llm = ChatGoogleGenerativeAI(
     temperature=settings.temperature,
 )
 
+def planner_node(state: AgentState) -> Dict[str, Any]:
+    """Break down complex queries."""
+    logger.info("Planner: Analyzing query...")
+    
+    # If we already have a plan or it's a follow-up, we might skip logic
+    # But for now, let's just plan every time
+    
+    chain = PLANNER_PROMPT | llm
+    response = chain.invoke({"query": state["query"]})
+    
+    plan = response.content
+    logger.info(f"Plan generated: {plan}")
+    
+    # We don't overwrite messages here, just update the 'plan' state
+    return {"plan": plan}
+
 def retrieval_node(state: AgentState) -> Dict[str, Any]:
     """
     Hybrid Retrieval: Search BOTH Knowledge Base and Web.
     """
-    query = state['query']
-    logger.info(f"Hybrid Retrieval for: {query}")
+    """Retrieve docs based on the PLAN, not just the raw query."""
+    
+    # Use the plan as the search context if available, else use query
+    search_query = state.get("plan", state["query"])
+    logger.info(f"Hybrid Retrieval for: {search_query}")
     
     final_docs = []
     
     # 1. Search Knowledge Base (Academic/Deep Info)
     try:
-        kb_result = SearchTool.search(query, k=settings.top_k_retrieval)
+        kb_result = SearchTool.search(search_query, k=settings.top_k_retrieval)
         if kb_result.get("raw_docs"):
             logger.info(f"   Found {len(kb_result['raw_docs'])} academic docs")
             # Label them clearly so the LLM knows these are from the papers
@@ -42,7 +61,7 @@ def retrieval_node(state: AgentState) -> Dict[str, Any]:
     # 2. Search Web (Current/General Info)
     # We ALWAYS search the web for completeness, or you could add a keyword check
     try:
-        web_result = WebSearchTool.search(query)
+        web_result = WebSearchTool.search(search_query)
         if web_result.get("context_str"):
             logger.info(f"   Found web results")
             final_docs.append(f"--- WEB SEARCH RESULTS ---\n{web_result['context_str']}")

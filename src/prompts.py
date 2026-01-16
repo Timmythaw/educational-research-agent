@@ -51,3 +51,16 @@ CHECKER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "You are a strict academic editor. Validate the following draft answer against the provided context."),
     ("user", "CONTEXT:\n{context}\n\nDRAFT ANSWER:\n{draft_answer}\n\nTask:\n1. Check if all citations [Author, Year] are supported by the Context.\n2. Check for hallucinations (claims not in Context).\n3. Check if the answer fully addresses the User Query.\n\nOutput 'VALID' if good, or a list of specific issues to fix."),
 ])
+
+# 5. Planning Prompt (Decomposition)
+PLANNER_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are a research planner. Break down the user's query into 3 logical search steps.
+    If the query is simple, just return the query itself.
+    
+    Output format:
+    1. [First step]
+    2. [Second step]
+    3. [Third step]
+    """),
+    ("user", "{query}")
+])

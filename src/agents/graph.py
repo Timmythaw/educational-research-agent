@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, END
 
 from src.config import settings
 from src.agents.state import AgentState
-from src.agents.nodes import retrieval_node, maker_node, checker_node
+from src.agents.nodes import retrieval_node, maker_node, checker_node, planner_node
 
 def should_continue(state: AgentState) -> str:
     """Decide whether to loop back or finish."""
@@ -20,28 +20,33 @@ def should_continue(state: AgentState) -> str:
     return "loop"
 
 def build_graph():
-    """Build the educational research agent graph."""
-    
     workflow = StateGraph(AgentState)
     
     # Add Nodes
+    workflow.add_node("planner", planner_node)
     workflow.add_node("retrieve", retrieval_node)
     workflow.add_node("maker", maker_node)
     workflow.add_node("checker", checker_node)
     
     # Define Edges
-    workflow.set_entry_point("retrieve")
+    workflow.set_entry_point("planner")
+    
+    workflow.add_edge("planner", "retrieve")
     workflow.add_edge("retrieve", "maker")
     workflow.add_edge("maker", "checker")
     
-    # Conditional Edge from Checker
     workflow.add_conditional_edges(
         "checker",
         should_continue,
         {
-            "loop": "maker",  # Go back to Maker to fix issues
-            "end": END        # Finish
+            "loop": "maker",
+            "end": END
         }
     )
     
-    return workflow.compile()
+    # Memory Checkpointer (Required for chat history!)
+    from langgraph.checkpoint.memory import MemorySaver
+    checkpointer = MemorySaver()
+    
+    return workflow.compile(checkpointer=checkpointer)
+

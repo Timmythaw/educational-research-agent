@@ -63,11 +63,12 @@ def run_agent():
             initial_state: AgentState = {
                 "query": query,
                 "messages": [HumanMessage(content=query)],
-                "iteration": 0,
+                "plan": "",
                 "retrieved_docs": [],
                 "draft_answer": "",
                 "critique": "",
-                "validation_status": ""
+                "validation_status": "",
+                "iteration": 0
             }
             
             # Stream events to show progress
