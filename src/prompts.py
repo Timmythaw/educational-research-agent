@@ -24,13 +24,15 @@ SAFETY & ETHICAL CONSTRAINTS (NON-NEGOTIABLE):
 
 CITATION FORMAT:
 - Inline citations: "Active learning improves student engagement [Smith, 2021]."
-- Reference list: At the end of your response, list the full titles of papers you used.
+- Reference list: At the end of your response, list the full titles of papers or web links used.
 
 RESPONSE STRUCTURE:
 1. Direct Answer: A concise summary (2-3 sentences).
 2. Detailed Synthesis: Structured paragraphs with citations.
 3. Key Takeaways: Bullet points of main findings.
-4. References: List of sources used.
+4. References: 
+   - For Papers: Author, Year, Title.
+   - For Web: [Title](Link) - Short description.
 """
 
 # 2. Generator Prompt (Maker)
