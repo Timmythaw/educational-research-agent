@@ -4,6 +4,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 
 
+# Get project root directory (parent of src/)
+PROJECT_ROOT = Path(__file__).parent.parent
+
+
 class Settings(BaseSettings):
     """Application settings loaded from .env file."""
     
@@ -12,7 +16,7 @@ class Settings(BaseSettings):
     
     # Model Configuration
     gemini_model: str = "gemini-2.5-flash"
-    embedding_model: str = "models/text-embedding-004"
+    embedding_model: str = "models/gemini-embedding-001"
     temperature: float = 0.1
     
     # RAG Configuration
@@ -23,10 +27,10 @@ class Settings(BaseSettings):
     # Agent Configuration
     max_iterations: int = 3
     
-    # Paths
-    data_dir: Path = Path("data")
-    papers_dir: Path = data_dir / "papers"
-    vector_store_dir: Path = data_dir / "vector_store"
+    # Paths (relative to project root)
+    data_dir: Path = PROJECT_ROOT / "data"
+    papers_dir: Path = PROJECT_ROOT / "data" / "papers"
+    vector_store_dir: Path = PROJECT_ROOT / "data" / "vector_store"
     
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -36,4 +40,4 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
-settings = Settings()
+settings = Settings() #type: ignore
