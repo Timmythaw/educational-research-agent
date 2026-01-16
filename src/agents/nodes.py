@@ -9,7 +9,7 @@ from src.config import settings
 from src.agents.state import AgentState
 from src.prompts import MAKER_PROMPT, CHECKER_PROMPT
 from src.tools.retriever import SearchTool
-from src.tools.web_search import WebSearchTool  # <--- Import this
+from src.tools.web_search import WebSearchTool
 
 logger = logging.getLogger(__name__)
 
@@ -21,40 +21,37 @@ llm = ChatGoogleGenerativeAI(
 )
 
 def retrieval_node(state: AgentState) -> Dict[str, Any]:
-    """Retrieve documents. Fallback to web search if needed."""
+    """
+    Hybrid Retrieval: Search BOTH Knowledge Base and Web.
+    """
     query = state['query']
-    logger.info(f"Retrieving info for: {query}")
-    
-    # 1. Try Knowledge Base first
-    kb_result = SearchTool.search(query, k=settings.top_k_retrieval)
-    kb_docs = kb_result.get("context_str", "")
-    kb_doc_list = kb_result.get("raw_docs", [])
+    logger.info(f"Hybrid Retrieval for: {query}")
     
     final_docs = []
     
-    # 2. Check if Knowledge Base results are sufficient
-    # Heuristic: If we found fewer than 1 doc or text is very short, try Web
-    if len(kb_doc_list) == 0 or len(kb_docs) < 200:
-        logger.warning("Knowledge Base yielded low results. Falling back to Web Search.")
-        
+    # 1. Search Knowledge Base (Academic/Deep Info)
+    try:
+        kb_result = SearchTool.search(query, k=settings.top_k_retrieval)
+        if kb_result.get("raw_docs"):
+            logger.info(f"   Found {len(kb_result['raw_docs'])} academic docs")
+            # Label them clearly so the LLM knows these are from the papers
+            final_docs.append(f"--- ACADEMIC KNOWLEDGE BASE ---\n{kb_result['context_str']}")
+    except Exception as e:
+        logger.error(f"   KB Search failed: {e}")
+
+    # 2. Search Web (Current/General Info)
+    # We ALWAYS search the web for completeness, or you could add a keyword check
+    try:
         web_result = WebSearchTool.search(query)
-        web_docs = web_result.get("context_str", "")
-        
-        if web_docs:
-            final_docs.append(web_docs)
-            # We can also mix them if we found partial info in KB
-            if kb_docs:
-                final_docs.append(kb_docs)
-        else:
-            # If web fails too, just return whatever KB had
-            final_docs.append(kb_docs)
-            
-    else:
-        # KB was good enough
-        final_docs.append(kb_docs)
+        if web_result.get("context_str"):
+            logger.info(f"   Found web results")
+            final_docs.append(f"--- WEB SEARCH RESULTS ---\n{web_result['context_str']}")
+    except Exception as e:
+        logger.error(f"   Web Search failed: {e}")
     
-    # Remove empty strings
-    final_docs = [d for d in final_docs if d]
+    # 3. Handle case with no results
+    if not final_docs:
+        final_docs = ["No relevant information found in Knowledge Base or Web."]
     
     return {"retrieved_docs": final_docs}
 
