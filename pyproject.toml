@@ -1,7 +1,47 @@
 [project]
 name = "educational-research-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Educational Research Agent with Agentic RAG and Safety Measures"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # LangChain Core
+    "langchain>=0.3.20",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    
+    # Google Gemini Integration
+    "langchain-google-genai>=2.0.6",
+    "google-generativeai>=0.8.3",
+    
+    # LangGraph for state machine
+    "langgraph>=0.2.70",
+    
+    # Vector Store
+    "faiss-cpu>=1.9.0",
+    
+    # Document Processing
+    "pypdf>=5.1.0",
+    "python-dotenv>=1.0.0",
+    
+    # Utilities
+    "pydantic>=2.10.5",
+    "pydantic-settings>=2.7.0",
+    "tiktoken>=0.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "jupyter>=1.1.1",
+    "ipykernel>=6.29.5",
+    "black>=24.10.0",
+    "ruff>=0.9.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.black]
+line-length = 100
+target-version = ['py312']
