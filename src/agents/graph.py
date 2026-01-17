@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, END
 
 from src.config import settings
 from src.agents.state import AgentState
-from src.agents.nodes import retrieval_node, maker_node, checker_node, planner_node
+from src.agents.nodes import checker_node, planner_node, researcher_node
 
 def should_continue(state: AgentState) -> str:
     """Decide whether to loop back or finish."""
@@ -24,27 +24,24 @@ def build_graph():
     
     # Add Nodes
     workflow.add_node("planner", planner_node)
-    workflow.add_node("retrieve", retrieval_node)
-    workflow.add_node("maker", maker_node)
+    workflow.add_node("researcher", researcher_node)
     workflow.add_node("checker", checker_node)
     
     # Define Edges
     workflow.set_entry_point("planner")
     
-    workflow.add_edge("planner", "retrieve")
-    workflow.add_edge("retrieve", "maker")
-    workflow.add_edge("maker", "checker")
+    workflow.add_edge("planner", "researcher")
+    workflow.add_edge("researcher", "checker")
     
     workflow.add_conditional_edges(
         "checker",
         should_continue,
         {
-            "loop": "maker",
+            "loop": "researcher", # Loop back to ReAct Agent
             "end": END
         }
     )
     
-    # Memory Checkpointer (Required for chat history!)
     from langgraph.checkpoint.memory import MemorySaver
     checkpointer = MemorySaver()
     

@@ -1,14 +1,23 @@
 """Nodes for the LangGraph workflow."""
 
+"""Nodes for the LangGraph workflow."""
+
 import logging
 from typing import Dict, Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
+
 from src.config import settings
 from src.agents.state import AgentState
-from src.prompts import MAKER_PROMPT, CHECKER_PROMPT, PLANNER_PROMPT_WITH_HISTORY
-from src.tools.retriever import SearchTool
-from src.tools.web_search import WebSearchTool
+from src.prompts import (
+    META_SYSTEM_PROMPT,
+    PLANNER_PROMPT_WITH_HISTORY
+)
+from src.tools.retriever import search_knowledge_base
+from src.tools.web_search import search_web
+from src.tools.academic import search_academic
 
 logger = logging.getLogger(__name__)
 
@@ -48,86 +57,85 @@ def planner_node(state: AgentState) -> Dict[str, Any]:
 
 
 
-def retrieval_node(state: AgentState) -> Dict[str, Any]:
+def researcher_node(state: AgentState) -> Dict[str, Any]:
     """
-    Hybrid Retrieval: Search BOTH Knowledge Base and Web.
+    Autonomous ReAct agent that decides which tools to use.
+    Replaces the fixed retrieval_node + maker_node.
     """
-    """Retrieve docs based on the PLAN, not just the raw query."""
+    logger.info("Researcher Agent: Working...")
     
-    # Use the plan as the search context if available, else use query
-    search_query = state.get("plan", state["query"])
-    logger.info(f"Hybrid Retrieval for: {search_query}")
+    # 1. Define Tools (KB, Web, ArXiv)
+    tools = [search_knowledge_base, search_web, search_academic]
     
-    final_docs = []
+    # 2. Create Agent with YOUR META_SYSTEM_PROMPT
+    # This ensures the agent follows your citation format and response structure
+    agent = create_agent(
+        model=llm,
+        tools=tools,
+        system_prompt=META_SYSTEM_PROMPT
+    )
     
-    # 1. Search Knowledge Base (Academic/Deep Info)
-    try:
-        kb_result = SearchTool.search(search_query, k=settings.top_k_retrieval)
-        if kb_result.get("raw_docs"):
-            logger.info(f"   Found {len(kb_result['raw_docs'])} academic docs")
-            # Label them clearly so the LLM knows these are from the papers
-            final_docs.append(f"--- ACADEMIC KNOWLEDGE BASE ---\n{kb_result['context_str']}")
-    except Exception as e:
-        logger.error(f"   KB Search failed: {e}")
-
-    # 2. Search Web (Current/General Info)
-    # We ALWAYS search the web for completeness, or you could add a keyword check
-    try:
-        web_result = WebSearchTool.search(search_query)
-        if web_result.get("context_str"):
-            logger.info(f"   Found web results")
-            final_docs.append(f"--- WEB SEARCH RESULTS ---\n{web_result['context_str']}")
-    except Exception as e:
-        logger.error(f"   Web Search failed: {e}")
+    # 3. Construct Input
+    query = state["query"]
+    plan = state.get("plan", "")
+    critique = state.get("critique", "")
     
-    # 3. Handle case with no results
-    if not final_docs:
-        final_docs = ["No relevant information found in Knowledge Base or Web."]
-    
-    return {"retrieved_docs": final_docs}
-
-# ... (Keep maker_node and checker_node exactly the same as before) ...
-def maker_node(state: AgentState) -> Dict[str, Any]:
-    """Generate a draft answer using retrieved docs."""
-    logger.info("Maker: Generating draft answer...")
-    
-    context = "\n\n".join(state["retrieved_docs"])
-    iteration = state.get("iteration", 0)
-    
-    if state.get("critique"):
-        prompt_input = (
-            f"Previous Draft: {state['draft_answer']}\n"
-            f"Checker's Critique: {state['critique']}\n\n"
-            f"Please write a NEW, improved answer that addresses the critique."
+    if critique:
+        # Loop mode: Agent needs to refine based on critique
+        user_message = (
+            f"Original Query: {query}\n\n"
+            f"Your previous answer was rejected with this critique:\n{critique}\n\n"
+            f"Please research again using your tools and provide an improved answer."
         )
     else:
-        prompt_input = state["query"]
-        
-    chain = MAKER_PROMPT | llm
-    response = chain.invoke({
-        "query": prompt_input,
-        "context": context
+        # First mode: Agent executes the plan
+        user_message = (
+            f"User Query: {query}\n\n"
+            f"Research Plan:\n{plan}\n\n"
+            f"Execute this plan using your tools (search_knowledge_base, search_web, search_academic). "
+            f"Follow the response structure defined in your system prompt."
+        )
+    
+    # 4. Invoke the Agent
+    result = agent.invoke({
+        "messages": [HumanMessage(content=user_message)]
     })
     
+    # 5. Extract Final Answer
+    final_message = result["messages"][-1]
+    
     return {
-        "draft_answer": response.content,
-        "iteration": iteration + 1
+        "draft_answer": final_message.content,
+        "iteration": state.get("iteration", 0) + 1
     }
 
 def checker_node(state: AgentState) -> Dict[str, Any]:
     """Validate the draft answer."""
     logger.info("Checker: Validating answer...")
     
-    context = "\n\n".join(state["retrieved_docs"])
+    from langchain_core.prompts import ChatPromptTemplate
+    
     draft = state["draft_answer"]
     
-    chain = CHECKER_PROMPT | llm
-    response = chain.invoke({
-        "context": context,
-        "draft_answer": draft
-    })
+    # Since the agent handles context internally, we validate based on:
+    # 1. Does it answer the query?
+    # 2. Does it cite sources?
+    # 3. Does it follow the response structure?
     
-     # Handle response content which may be a string or have content attribute
+    CHECKER_PROMPT_AGENT = ChatPromptTemplate.from_messages([
+        ("system", "You are a strict academic editor."),
+        ("user", f"Draft Answer:\n{draft}\n\n"
+                 "Task:\n"
+                 "1. Does this answer follow the required response structure (Direct Answer, Detailed Synthesis, Key Takeaways, References)?\n"
+                 "2. Does it cite sources properly?\n"
+                 "3. Does it sound plausible and avoid hallucinations?\n\n"
+                 "Output 'VALID' if the answer is acceptable, or provide a specific Critique listing issues to fix.")
+    ])
+    
+    chain = CHECKER_PROMPT_AGENT | llm
+    response = chain.invoke({})
+    
+    # Handle response content which may be a string or have content attribute
     content = response.content if isinstance(response.content, str) else str(response.content)
     critique = content.strip()
     
@@ -140,3 +148,4 @@ def checker_node(state: AgentState) -> Dict[str, Any]:
         "critique": critique,
         "validation_status": status
     }
+    
