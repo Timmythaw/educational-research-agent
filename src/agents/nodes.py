@@ -7,7 +7,7 @@ from typing import Dict, Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from src.config import settings
 from src.agents.state import AgentState
@@ -53,15 +53,16 @@ def planner_node(state: AgentState) -> Dict[str, Any]:
     })
     
     plan = response.content
-    return {"plan": plan}
-
-
+    return {
+        "plan": plan,
+        "messages": [AIMessage(content=f"[PLAN] {plan}", name="planner")]
+    }
 
 def researcher_node(state: AgentState) -> Dict[str, Any]:
     """
-    Autonomous ReAct agent that decides which tools to use.
+    Autonomous ReAct agent with conversation memory.
     """
-    logger.info("Researcher Agent: Working...")
+    logger.info("Researcher Agent: Working with memory context...")
     
     tools = [search_knowledge_base, search_web]
     
@@ -74,47 +75,67 @@ def researcher_node(state: AgentState) -> Dict[str, Any]:
     query = state["query"]
     plan = state.get("plan", "")
     critique = state.get("critique", "")
+    messages = state.get("messages", [])
+    iteration = state.get("iteration", 0)
     
+    # Return context-aware prompt with conversation history
     if critique:
-        # Don't use f-string with variables that might contain curly braces
+        # Include conversation context when refining
+        recent_context = "\n".join([
+            f"{m.type}: {m.content[:200]}" 
+            for m in messages[-6:-1]  # Last 5 messages before current query
+        ]) if len(messages) > 1 else ""
+        
         user_message = (
             "Original Query: " + query + "\n\n"
+            "Recent Conversation Context:\n" + (recent_context or "None") + "\n\n"
             "Your previous answer was rejected with this critique:\n" + critique + "\n\n"
-            "Please research again using your tools and provide an improved answer."
+            "Please research again using your tools and provide an improved answer that addresses the critique."
         )
     else:
+        # Initial research with any relevant history
+        recent_context = "\n".join([
+            f"{m.type}: {m.content[:200]}" 
+            for m in messages[-6:-1]
+        ]) if len(messages) > 1 else ""
+        
         user_message = (
             "User Query: " + query + "\n\n"
+        )
+        
+        if recent_context:
+            user_message += "Recent Conversation Context:\n" + recent_context + "\n\n"
+        
+        user_message += (
             "Research Plan:\n" + plan + "\n\n"
-            "Execute this plan using your tools (search_knowledge_base, search_web, search_academic). "
+            "Execute this plan using your tools (search_knowledge_base, search_web). "
             "Follow the response structure defined in your system prompt."
         )
-
-    # Streaming to capture intermediate steps
+    
+    logger.info(f"Researcher context includes {len(messages)} messages")
+    
+    # Stream agent execution to capture steps
     agent_steps = []
-    draft_text = ""
     
     for event in agent.stream({"messages": [{"role": "user", "content": user_message}]}):
-        # Log each step for transparency
         for key, value in event.items():
             if key == "agent":
-                # Agent is thinking/reasoning
                 message = value["messages"][-1]
-                logger.info(f"Agent reasoning: {message}")
-                agent_steps.append({"type": "reasoning", "content": message})
+                agent_steps.append({
+                    "type": "reasoning", 
+                    "content": message
+                })
                 
             elif key == "tools":
-                # Tools are being called
                 tool_calls = value.get("messages", [])
                 for tool_msg in tool_calls:
-                    logger.info(f"Tool called: {tool_msg.name if hasattr(tool_msg, 'name') else 'unknown'}")
                     agent_steps.append({
                         "type": "tool_call",
                         "tool": getattr(tool_msg, 'name', 'unknown'),
                         "result": str(tool_msg.content)[:200]
                     })
     
-    # Pass as dict (not HumanMessage)
+    # Get final result
     result = agent.invoke({
         "messages": [HumanMessage(content=user_message)]
     })
@@ -123,81 +144,84 @@ def researcher_node(state: AgentState) -> Dict[str, Any]:
     
     # Handle different content formats
     if isinstance(final_message.content, list):
-        # Content is a list of content blocks (like your case)
         draft_text = ""
         for block in final_message.content:
             if isinstance(block, dict) and block.get("type") == "text":
                 draft_text += block.get("text", "")
     elif isinstance(final_message.content, str):
-        # Content is a plain string
         draft_text = final_message.content
     else:
-        # Fallback
         draft_text = str(final_message.content)
     
+    # Return draft AND append to messages
     return {
         "draft_answer": draft_text,
-        "iteration": state.get("iteration", 0) + 1,
-        "agent_steps": agent_steps
+        "iteration": iteration + 1,
+        "agent_steps": agent_steps,
+        "messages": [AIMessage(content=f"[RESEARCH DRAFT {iteration + 1}] {draft_text[:200]}...", name="researcher")]
     }
 
+
 def checker_node(state: AgentState) -> Dict[str, Any]:
-    """Validate the draft answer."""
+    """Validate the draft answer with context awareness."""
     logger.info("Checker: Validating answer...")
     
     from langchain_core.prompts import ChatPromptTemplate
     
     draft = state["draft_answer"]
+    query = state["query"]
     iteration = state.get("iteration", 0)
     
-    # Ensure draft is a string (it might be a list or other type)
+    # Ensure draft is a string
     if isinstance(draft, list):
         draft = "\n".join(str(item) for item in draft)
     elif not isinstance(draft, str):
         draft = str(draft)
     
+    # Lenient validation after iteration 2
     if iteration >= 2:
         logger.info("Iteration limit approaching. Using lenient validation.")
-        # Just check if there's substantial content
-        if len(draft) > 200 and ("References" in draft or "Source" in draft):
+        if len(draft) > 200 and ("References" in draft or "Source" in draft or "http" in draft):
             return {
-                "critique": "VALID (lenient mode due to iteration limit)",
-                "validation_status": "VALID"
+                "critique": "VALID (lenient mode - iteration limit reached)",
+                "validation_status": "VALID",
+                "messages": [AIMessage(content="[CHECKER] VALID", name="checker")]
             }
-    # Since the agent handles context internally, we validate based on:
-    # 1. Does it answer the query?
-    # 2. Does it cite sources?
-    # 3. Does it follow the response structure?
     
-    # Build the full user message first to avoid template variable issues
+    # Build validation prompt
     user_message = (
+        "Original Query: " + query + "\n\n"
         "Draft Answer:\n" + draft + "\n\n"
-        "Task:\n"
-        "1. Does this answer the user's query reasonably well?\n"
-        "2. Does it cite sources properly?\n"
-        "3. Does it sound plausible and avoid hallucinations?\n\n"
-        "Output 'VALID' if the answer is acceptable, or provide a specific Critique listing issues to fix."
+        "Validation Criteria:\n"
+        "1. Does this answer the user's query comprehensively?\n"
+        "2. Does it cite sources with proper attribution?\n"
+        "3. Is the information accurate and well-reasoned?\n"
+        "4. Does it avoid hallucinations or unsupported claims?\n\n"
+        "Output 'VALID' if acceptable, or provide a specific Critique with actionable feedback."
     )
     
-    CHECKER_PROMPT_AGENT = ChatPromptTemplate.from_messages([
-        ("system", "You are an academic editor. Be reasonably strict but not overly critical."),
+    CHECKER_PROMPT = ChatPromptTemplate.from_messages([
+        ("system", "You are an academic editor validating research answers. Be constructive but thorough."),
         ("user", "{user_input}")
     ])
     
-    chain = CHECKER_PROMPT_AGENT | llm
+    chain = CHECKER_PROMPT | llm
     response = chain.invoke({"user_input": user_message})
     
-    # Handle response content which may be a string or have content attribute
     content = response.content if isinstance(response.content, str) else str(response.content)
     critique = content.strip()
     
+    # Determine validation status
     if "VALID" in critique.upper() and len(critique) < 50:
         status = "VALID"
     else:
         status = "INVALID"
-        
+    
+    logger.info(f"Validation result: {status}")
+    
+    # Return validation AND append to messages
     return {
         "critique": critique,
-        "validation_status": status
+        "validation_status": status,
+        "messages": [AIMessage(content=f"[CHECKER] {status}: {critique[:100]}", name="checker")]
     }
-    
