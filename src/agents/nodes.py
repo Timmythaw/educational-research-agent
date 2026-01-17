@@ -64,7 +64,7 @@ def researcher_node(state: AgentState) -> Dict[str, Any]:
     """
     logger.info("Researcher Agent: Working with memory context...")
     
-    tools = [search_knowledge_base, search_web]
+    tools = [search_knowledge_base, search_web, search_academic]
     
     agent = create_agent(
         model=llm,
