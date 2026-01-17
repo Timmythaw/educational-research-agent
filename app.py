@@ -97,7 +97,8 @@ if query:
             "draft_answer": "",
             "critique": "",
             "validation_status": "",
-            "iteration": 0
+            "iteration": 0,
+            "agent_steps": []
         }
         
         # Config acts as the session key for LangGraph memory
@@ -106,49 +107,52 @@ if query:
         final_answer = ""
         
         try:
-            # We use a status container to show the "thinking" process
             with st.status("Agent is working...", expanded=True) as status:
                 
-                # Stream the graph execution with memory config
                 for event in st.session_state.agent.stream(initial_state, config=config):
                     for key, value in event.items():
                         
                         if key == "planner":
                             plan = value.get("plan", "")
-                            st.write("**Planner generated a search strategy:**")
-                            st.info(plan)
-                            
-                        elif key == "retrieve":
-                            docs = value.get("retrieved_docs", [])
-                            st.write(f"Retrieved {len(docs)} context sources.")
-                            with st.expander("View Source Context"):
-                                st.text("\n\n".join(docs)[:1000] + "...")
+                            st.write("**Planner:** Generated search strategy")
+                            with st.expander("View Plan"):
+                                st.info(plan)
                                 
-                        elif key == "maker":
-                            st.write("Maker is drafting an answer...")
+                        elif key == "researcher":
+                            st.write("**Researcher:** Working with tools...")
                             
+                            # Display agent steps
+                            agent_steps = value.get("agent_steps", [])
+                            if agent_steps:
+                                with st.expander(f"Agent Reasoning ({len(agent_steps)} steps)", expanded=True):
+                                    for i, step in enumerate(agent_steps):
+                                        if step["type"] == "tool_call":
+                                            st.write(f"Tool {i+1}: `{step['tool']}`")
+                                            with st.container():
+                                                st.caption(step['result'])
+                                        elif step["type"] == "reasoning":
+                                            st.write(f"Thought {i+1}:")
+                                            st.caption(str(step['content'])[:300])
+                                
                         elif key == "checker":
                             valid_status = value.get("validation_status")
                             critique = value.get("critique")
                             
                             if valid_status == "VALID":
-                                st.write("Checker approved the draft.")
+                                st.write("Checker: Answer approved!")
                             else:
-                                st.warning("Checker found issues. Refining...")
-                                st.info(f"Critique: {critique}")
+                                st.warning("Checker: Found issues, refining...")
+                                with st.expander("View Critique"):
+                                    st.info(critique)
                 
                 status.update(label="Research Complete!", state="complete")
-
-            # 4. Fetch and Display Final Answer
-            # Run invoke one last time to get the final state
+            # 4. Display Final Answer
             final_state = st.session_state.agent.invoke(initial_state, config=config)
             final_answer = final_state.get("draft_answer", "Error generating answer.")
             
             response_placeholder.markdown(final_answer)
-            
-            # Save to history
             st.session_state.messages.append(AIMessage(content=final_answer))
             
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            st.error(f"Error: {e}")
             logger.error(f"Streamlit Error: {e}")

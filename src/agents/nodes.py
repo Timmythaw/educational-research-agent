@@ -88,6 +88,30 @@ def researcher_node(state: AgentState) -> Dict[str, Any]:
             "Execute this plan using your tools (search_knowledge_base, search_web, search_academic). "
             "Follow the response structure defined in your system prompt."
         )
+
+    # Streaming to capture intermediate steps
+    agent_steps = []
+    draft_text = ""
+    
+    for event in agent.stream({"messages": [{"role": "user", "content": user_message}]}):
+        # Log each step for transparency
+        for key, value in event.items():
+            if key == "agent":
+                # Agent is thinking/reasoning
+                message = value["messages"][-1]
+                logger.info(f"Agent reasoning: {message}")
+                agent_steps.append({"type": "reasoning", "content": message})
+                
+            elif key == "tools":
+                # Tools are being called
+                tool_calls = value.get("messages", [])
+                for tool_msg in tool_calls:
+                    logger.info(f"Tool called: {tool_msg.name if hasattr(tool_msg, 'name') else 'unknown'}")
+                    agent_steps.append({
+                        "type": "tool_call",
+                        "tool": getattr(tool_msg, 'name', 'unknown'),
+                        "result": str(tool_msg.content)[:200]
+                    })
     
     # Pass as dict (not HumanMessage)
     result = agent.invoke({
@@ -112,7 +136,8 @@ def researcher_node(state: AgentState) -> Dict[str, Any]:
     
     return {
         "draft_answer": draft_text,
-        "iteration": state.get("iteration", 0) + 1
+        "iteration": state.get("iteration", 0) + 1,
+        "agent_steps": agent_steps
     }
 
 def checker_node(state: AgentState) -> Dict[str, Any]:

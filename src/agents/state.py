@@ -1,7 +1,7 @@
 """State definition with memory."""
 
 import operator
-from typing import TypedDict, List, Annotated
+from typing import TypedDict, List, Annotated, Dict, Any
 from langchain_core.messages import BaseMessage
 
 class AgentState(TypedDict):
@@ -23,3 +23,4 @@ class AgentState(TypedDict):
     critique: str
     validation_status: str
     iteration: int
+    agent_steps: List[Dict[str, Any]]
