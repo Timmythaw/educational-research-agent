@@ -1,5 +1,6 @@
 """LangGraph workflow definition."""
 
+from asyncio.log import logger
 from langgraph.graph import StateGraph, END
 
 from src.config import settings
@@ -7,17 +8,23 @@ from src.agents.state import AgentState
 from src.agents.nodes import checker_node, planner_node, researcher_node
 
 def should_continue(state: AgentState) -> str:
-    """Decide whether to loop back or finish."""
-    status = state["validation_status"]
-    iteration = state["iteration"]
+    """Decide whether to continue refinement or end."""
     
-    if status == "VALID":
+    # 1. Check iteration limit FIRST
+    max_iterations = 3
+    current_iteration = state.get("iteration", 0)
+    
+    if current_iteration >= max_iterations:
+        logger.warning(f"Max iterations ({max_iterations}) reached. Ending loop.")
         return "end"
     
-    if iteration >= settings.max_iterations:
-        return "end"  # Force finish to prevent infinite loops
-        
-    return "loop"
+    # 2. Check validation status
+    validation_status = state.get("validation_status", "INVALID")
+    
+    if validation_status == "VALID":
+        return "end"
+    else:
+        return "loop"
 
 def build_graph():
     workflow = StateGraph(AgentState)
