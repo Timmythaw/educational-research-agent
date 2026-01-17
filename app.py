@@ -91,7 +91,7 @@ if query:
         # Prepare state and config for memory
         initial_state: AgentState = {
             "query": query,
-            "messages": [HumanMessage(content=query)],
+            "messages": st.session_state.messages.copy(),
             "plan": "",
             "retrieved_docs": [],
             "draft_answer": "",
@@ -114,26 +114,33 @@ if query:
                         
                         if key == "planner":
                             plan = value.get("plan", "")
-                            st.write("**Planner:** Generated search strategy")
+                            st.write("Planner: Generated search strategy")
                             with st.expander("View Plan"):
                                 st.info(plan)
                                 
                         elif key == "researcher":
-                            st.write("**Researcher:** Working with tools...")
-                            
-                            # Display agent steps
+                            st.write("**🔬 Research Agent:** Gathering sources...")
+                
                             agent_steps = value.get("agent_steps", [])
                             if agent_steps:
-                                with st.expander(f"Agent Reasoning ({len(agent_steps)} steps)", expanded=True):
+                                with st.expander(f"Research Steps ({len(agent_steps)} actions)", expanded=True):
                                     for i, step in enumerate(agent_steps):
                                         if step["type"] == "tool_call":
-                                            st.write(f"Tool {i+1}: `{step['tool']}`")
+                                            st.write(f"**Tool {i+1}:** `{step['tool']}`")
                                             with st.container():
                                                 st.caption(step['result'])
                                         elif step["type"] == "reasoning":
-                                            st.write(f"Thought {i+1}:")
+                                            st.write(f"**Thought {i+1}:**")
                                             st.caption(str(step['content'])[:300])
                                 
+                        elif key == "writer":
+                            iteration = value.get("iteration", 0)
+                            if iteration == 1:
+                                st.write("**Writer:** Drafting answer from sources...")
+                            else:
+                                st.write(f"**Writer:** Refining answer (iteration {iteration})...")
+
+
                         elif key == "checker":
                             valid_status = value.get("validation_status")
                             critique = value.get("critique")

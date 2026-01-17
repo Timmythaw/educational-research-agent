@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 arxiv_wrapper = ArxivAPIWrapper(
     arxiv_search=arxiv.Search,
     arxiv_exceptions=arxiv.ArxivError,
-    top_k_results=5,
-    doc_content_chars_max=3000
+    top_k_results=3,
+    doc_content_chars_max=2000
 )
 
 class AcademicSearchTool:

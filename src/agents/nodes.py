@@ -7,6 +7,7 @@ from typing import Dict, Any
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
+from langchain_core.prompts import ChatPromptTemplate
 
 from src.config import settings
 from src.agents.state import AgentState
@@ -54,64 +55,59 @@ def planner_node(state: AgentState) -> Dict[str, Any]:
     plan = response.content
     return {"plan": plan}
 
-
-
 def researcher_node(state: AgentState) -> Dict[str, Any]:
     """
     Autonomous ReAct agent that decides which tools to use.
     """
     logger.info("Researcher Agent: Working...")
-    
+    if state.get("retrieved_docs"):
+        logger.info("Sources already gathered, skipping research.")
+        return {}
+
     tools = [search_knowledge_base, search_web]
     
     agent = create_agent(
         model=llm,
         tools=tools,
-        system_prompt=META_SYSTEM_PROMPT
+        system_prompt="""You are a research assistant. Your job is to:
+        1. Use your tools to gather relevant information
+        2. Return the raw research findings WITHOUT writing a final answer
+        3. Be thorough - use multiple tools and queries
+
+        Do NOT write a final answer. Just gather comprehensive context.""",
     )
     
     query = state["query"]
     plan = state.get("plan", "")
-    critique = state.get("critique", "")
-    
-    if critique:
-        # Don't use f-string with variables that might contain curly braces
-        user_message = (
-            "Original Query: " + query + "\n\n"
-            "Your previous answer was rejected with this critique:\n" + critique + "\n\n"
-            "Please research again using your tools and provide an improved answer."
-        )
-    else:
-        user_message = (
-            "User Query: " + query + "\n\n"
-            "Research Plan:\n" + plan + "\n\n"
-            "Execute this plan using your tools (search_knowledge_base, search_web, search_academic). "
-            "Follow the response structure defined in your system prompt."
-        )
+    user_message = (
+        "User Query: " + query + "\n\n"
+        "Research Plan:\n" + plan + "\n\n"
+        "Execute this plan using your tools (search_knowledge_base, search_web, search_academic). "
+        "Return all relevant findings."
+    )
 
     # Streaming to capture intermediate steps
     agent_steps = []
-    draft_text = ""
-    
-    for event in agent.stream({"messages": [{"role": "user", "content": user_message}]}):
-        # Log each step for transparency
-        for key, value in event.items():
-            if key == "agent":
-                # Agent is thinking/reasoning
-                message = value["messages"][-1]
-                logger.info(f"Agent reasoning: {message}")
-                agent_steps.append({"type": "reasoning", "content": message})
-                
-            elif key == "tools":
-                # Tools are being called
-                tool_calls = value.get("messages", [])
-                for tool_msg in tool_calls:
-                    logger.info(f"Tool called: {tool_msg.name if hasattr(tool_msg, 'name') else 'unknown'}")
-                    agent_steps.append({
-                        "type": "tool_call",
-                        "tool": getattr(tool_msg, 'name', 'unknown'),
-                        "result": str(tool_msg.content)[:200]
-                    })
+    try:
+        for event in agent.stream({"messages": [{"role": "user", "content": user_message}]}):
+            for key, value in event.items():
+                if key == "agent":
+                    message = value["messages"][-1]
+                    logger.info(f"Research reasoning: {message}")
+                    agent_steps.append({"type": "reasoning", "content": str(message)})
+                    
+                elif key == "tools":
+                    tool_calls = value.get("messages", [])
+                    for tool_msg in tool_calls:
+                        tool_name = getattr(tool_msg, 'name', 'unknown')
+                        logger.info(f"Tool called: {tool_name}")
+                        agent_steps.append({
+                            "type": "tool_call",
+                            "tool": tool_name,
+                            "result": str(tool_msg.content)[:200]
+                        })
+    except Exception as e:
+        logger.warning(f"Research streaming failed: {e}")
     
     # Pass as dict (not HumanMessage)
     result = agent.invoke({
@@ -122,23 +118,98 @@ def researcher_node(state: AgentState) -> Dict[str, Any]:
     
     # Handle different content formats
     if isinstance(final_message.content, list):
-        # Content is a list of content blocks (like your case)
-        draft_text = ""
+        research_context = ""
         for block in final_message.content:
             if isinstance(block, dict) and block.get("type") == "text":
-                draft_text += block.get("text", "")
+                research_context += block.get("text", "")
     elif isinstance(final_message.content, str):
-        # Content is a plain string
-        draft_text = final_message.content
+        research_context = final_message.content
     else:
-        # Fallback
-        draft_text = str(final_message.content)
+        research_context = str(final_message.content)
+    
+    # Fallback if no steps captured
+    if not agent_steps:
+        agent_steps.append({
+            "type": "tool_call",
+            "tool": "Research Agent",
+            "result": "Completed source gathering"
+        })
+    
+    return {
+        "retrieved_docs": [research_context],  # Store all gathered context
+        "agent_steps": agent_steps
+    }
+
+def writer_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Writer node - Writes answer using pre-gathered sources.
+    This node CAN loop if checker rejects.
+    """
+    logger.info("Writer: Drafting answer...")
+    
+    query = state["query"]
+    plan = state.get("plan", "")
+    retrieved_docs = state.get("retrieved_docs", [])
+    critique = state.get("critique", "")
+    iteration = state.get("iteration", 0)
+    
+    # Combine all research context
+    research_context = "\n\n".join(retrieved_docs)
+    
+    if critique and iteration > 0:
+        # Refinement mode
+        old_draft = state.get("draft_answer", "")
+        
+        WRITER_PROMPT = ChatPromptTemplate.from_messages([
+            ("system", META_SYSTEM_PROMPT),
+            ("user", """Previous Draft:
+{old_draft}
+
+Checker's Critique:
+{critique}
+
+Research Context:
+{context}
+
+Task: Revise the draft to address the critique. Use the research context to add missing citations or fix errors. Maintain the good parts of the original.""")
+        ])
+        
+        chain = WRITER_PROMPT | llm
+        response = chain.invoke({
+            "old_draft": old_draft,
+            "critique": critique,
+            "context": research_context
+        })
+        
+    else:
+        # First draft mode
+        WRITER_PROMPT = ChatPromptTemplate.from_messages([
+            ("system", META_SYSTEM_PROMPT),
+            ("user", """User Query: {query}
+
+Research Plan:
+{plan}
+
+Research Context (from tools):
+{context}
+
+Task: Write a comprehensive answer following the response structure in your system prompt. Use ONLY information from the research context. Cite sources properly.""")
+        ])
+        
+        chain = WRITER_PROMPT | llm
+        response = chain.invoke({
+            "query": query,
+            "plan": plan,
+            "context": research_context
+        })
+    
+    draft_text = response.content if isinstance(response.content, str) else str(response.content)
     
     return {
         "draft_answer": draft_text,
-        "iteration": state.get("iteration", 0) + 1,
-        "agent_steps": agent_steps
+        "iteration": iteration + 1
     }
+
 
 def checker_node(state: AgentState) -> Dict[str, Any]:
     """Validate the draft answer."""
