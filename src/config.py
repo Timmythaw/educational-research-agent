@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     google_search_api_key: str = ""  # For web search fallback
     
     # Model Configuration
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3-pro-preview"
     embedding_model: str = "models/gemini-embedding-001"
     temperature: float = 0.1
     

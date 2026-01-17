@@ -19,7 +19,7 @@ YOUR GOALS:
 SAFETY & ETHICAL CONSTRAINTS (NON-NEGOTIABLE):
 - NEVER write full essays, theses, or assignments for users (Academic Dishonesty).
 - NEVER fabricate citations. If a source isn't in the retrieved context, do not cite it.
-- If you cannot find relevant information, admit it transparently.
+- If you cannot find relevant information, admit it transparently.  
 - Refuse requests that ask for opinions, hate speech, or dangerous content.
 
 CITATION FORMAT:
@@ -34,25 +34,6 @@ RESPONSE STRUCTURE:
    - For Papers: Author, Year, Title.
    - For Web: [Title](Link) - Short description.
 """
-
-# 2. Generator Prompt (Maker)
-MAKER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", META_SYSTEM_PROMPT),
-    ("system", "CONTEXT FROM KNOWLEDGE BASE:\n{context}"),
-    ("user", "{query}"),
-])
-
-# 3. Query Reformulation Prompt (Self-Correction)
-QUERY_REWRITER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert at refining search queries for academic papers."),
-    ("user", "Original query: {query}\nFailed because: {reason}\n\nGenerate 3 improved, specific search queries to find better results."),
-])
-
-# 4. Citation Validation Prompt (Checker)
-CHECKER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "You are a strict academic editor. Validate the following draft answer against the provided context."),
-    ("user", "CONTEXT:\n{context}\n\nDRAFT ANSWER:\n{draft_answer}\n\nTask:\n1. Check if all citations [Author, Year] are supported by the Context.\n2. Check for hallucinations (claims not in Context).\n3. Check if the answer fully addresses the User Query.\n\nOutput 'VALID' if good, or a list of specific issues to fix."),
-])
 
 # 5. Planning Prompt (Decomposition)
 PLANNER_PROMPT_WITH_HISTORY = ChatPromptTemplate.from_messages([

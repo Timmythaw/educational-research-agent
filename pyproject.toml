@@ -25,6 +25,9 @@ dependencies = [
     "tiktoken>=0.8.0",
     "langchain-google-community>=3.0.5",
     "streamlit>=1.53.0",
+    "arxiv>=2.4.0",
+    "langchainhub>=0.1.21",
+    "langsmith>=0.6.4",
 ]
 
 [project.optional-dependencies]
