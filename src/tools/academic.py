@@ -1,46 +1,81 @@
-"""Academic search tool using ArXiv."""
+"""Academic search with thread-safe ArXiv access."""
 
 import logging
-from typing import Dict, Any
-from langchain_community.utilities import ArxivAPIWrapper
-from langchain_core.tools import tool
+import threading
 import arxiv
+from typing import Dict, Any
+
+from langchain_core.tools import tool
 
 logger = logging.getLogger(__name__)
 
-# Initialize ArXiv
-# doc_content_chars_max limits the text size so we don't blow up context
-arxiv_wrapper = ArxivAPIWrapper(
-    arxiv_search=arxiv.Search,
-    arxiv_exceptions=arxiv.ArxivError,
-    top_k_results=3,
-    doc_content_chars_max=2000
-)
+# Thread lock for ArXiv API
+_arxiv_lock = threading.Lock()
+
 
 class AcademicSearchTool:
+    """Tool for searching academic papers on ArXiv with thread safety."""
+    
     @staticmethod
-    def search(query: str) -> Dict[str, Any]:
+    def search(query: str, max_results: int = 5) -> Dict[str, Any]:
         try:
             logger.info(f"Searching ArXiv for: {query}")
-            results = arxiv_wrapper.run(query)
             
-            # If ArXiv returns "No good ArXiv Result Found", handle it
-            if "No good ArXiv Result" in results:
-                return {"context_str": "", "source": "arxiv"}
+            # Lock ArXiv searches
+            with _arxiv_lock:
+                search = arxiv.Search(
+                    query=query,
+                    max_results=max_results,
+                    sort_by=arxiv.SortCriterion.Relevance
+                )
                 
+                results = []
+                for paper in search.results():
+                    results.append({
+                        "title": paper.title,
+                        "authors": [author.name for author in paper.authors],
+                        "summary": paper.summary[:300],
+                        "url": paper.entry_id,
+                        "published": str(paper.published.date())
+                    })
+            
+            if not results:
+                return {
+                    "context_str": "⚠️ No academic papers found for this query.",
+                    "source": "arxiv"
+                }
+            
+            formatted = []
+            for paper in results:
+                authors_str = ", ".join(paper["authors"][:3])
+                formatted.append(
+                    f"**{paper['title']}**\n"
+                    f"Authors: {authors_str}\n"
+                    f"Published: {paper['published']}\n"
+                    f"Link: {paper['url']}\n"
+                    f"Summary: {paper['summary']}\n"
+                )
+            
+            context_str = "\n---\n".join(formatted)
+            
             return {
-                "context_str": f"--- ACADEMIC PAPERS (ARXIV) ---\n{results}",
+                "context_str": f"--- ACADEMIC PAPERS (ArXiv) ---\n{context_str}",
                 "source": "arxiv"
             }
+            
         except Exception as e:
             logger.error(f"ArXiv search failed: {e}")
-            return {"context_str": "", "error": str(e)}
+            return {
+                "context_str": "⚠️ Academic search failed.",
+                "error": str(e)
+            }
+
 
 @tool
 def search_academic(query: str) -> str:
     """
-    Search ArXiv for actual academic research papers, abstracts, and authors.
-    Use this when you need deep scientific or technical verification.
+    Search for academic papers on ArXiv.
+    Thread-safe implementation.
     """
     result = AcademicSearchTool.search(query)
-    return result["context_str"]
+    return result.get("context_str", "")

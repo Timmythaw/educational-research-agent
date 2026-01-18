@@ -69,7 +69,7 @@ def researcher_node(state: AgentState) -> Dict[str, Any]:
     agent = create_agent(
         model=llm,
         tools=tools,
-        system_prompt=META_SYSTEM_PROMPT
+        system_prompt=META_SYSTEM_PROMPT,
     )
     
     query = state["query"]
