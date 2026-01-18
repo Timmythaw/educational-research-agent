@@ -19,7 +19,7 @@ def get_vector_manager() -> VectorStoreManager:
     if _vector_manager is None:
         _vector_manager = VectorStoreManager()
         try:
-            _vector_manager.load_vectorstore()
+            _vector_manager.load_or_create()
         except FileNotFoundError:
             logger.warning("Vector store not found. Search will return empty results.")
     return _vector_manager
@@ -42,11 +42,11 @@ class SearchTool:
         """
         manager = get_vector_manager()
         
-        if manager.vectorstore is None:
+        if manager.vector_store is None:
             return {"error": "Knowledge base not loaded", "documents": []}
             
         try:
-            results = manager.search(query, k=k)
+            results = manager.similarity_search(query, k=k)
             
             # Format for the LLM
             formatted_docs = []
