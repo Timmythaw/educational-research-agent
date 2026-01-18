@@ -71,7 +71,7 @@ def build_knowledge_base():
     vector_manager = VectorStoreManager()
     
     try:
-        vectorstore = vector_manager.create_vectorstore(documents)
+        vector_manager.load_or_create(documents)
         logger.info("Vector store created")
         logger.info("")
     except Exception as e:
@@ -81,24 +81,27 @@ def build_knowledge_base():
     
     # Step 3: Save vector store
     logger.info("Step 3/3: Saving vector store to disk...")
-    vector_manager.save_vectorstore(vectorstore)
+    vector_manager.save()
     logger.info("Vector store saved")
     logger.info("")
     
     # Display statistics
-    stats = vector_manager.get_stats()
     logger.info("=" * 60)
     logger.info("KNOWLEDGE BASE STATISTICS")
     logger.info("=" * 60)
-    logger.info(f"Total documents: {stats['num_documents']}")
-    logger.info(f"Unique papers: {stats['num_sources']}")
+    logger.info(f"Total documents: {len(documents)}")
+    
+    # Get unique sources
+    sources = set(doc.metadata.get('source', 'Unknown') for doc in documents)
+    logger.info(f"Unique papers: {len(sources)}")
     logger.info(f"Storage location: {settings.vector_store_dir}")
     logger.info("")
     logger.info("Papers included:")
-    for source in stats['sources'][:10]:  # Show first 10
-        logger.info(f"  - {source}")
-    if len(stats['sources']) > 10:
-        logger.info(f"  ... and {len(stats['sources']) - 10} more")
+    for source in sorted(sources)[:10]:  # Show first 10
+        source_name = Path(source).name if source != 'Unknown' else source
+        logger.info(f"  - {source_name}")
+    if len(sources) > 10:
+        logger.info(f"  ... and {len(sources) - 10} more")
     logger.info("")
     logger.info("=" * 60)
     logger.info("KNOWLEDGE BASE READY!")
