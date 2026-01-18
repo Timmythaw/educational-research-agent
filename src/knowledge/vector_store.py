@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _faiss_lock = threading.Lock()
 
 
-class VectorStore:
+class VectorStoreManager:
     """Manages the FAISS vector store with thread-safe operations."""
     
     def __init__(self):
