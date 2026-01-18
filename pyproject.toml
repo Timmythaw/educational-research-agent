@@ -28,6 +28,7 @@ dependencies = [
     "arxiv>=2.4.0",
     "langchainhub>=0.1.21",
     "langsmith>=0.6.4",
+    "certifi>=2026.1.4",
 ]
 
 [project.optional-dependencies]

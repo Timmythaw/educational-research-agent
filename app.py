@@ -1,5 +1,5 @@
 """
-Educational Research Agent - Streamlit UI with Async Live Streaming (FIXED)
+Educational Research Agent - Streamlit UI with Dynamic Status
 """
 
 import logging
@@ -38,10 +38,10 @@ st.set_page_config(
 st.title("🎓 Educational Research Assistant")
 st.markdown("""
 This AI agent helps you research academic topics by combining:
-- 🧠 **Planner & Memory** (Context-aware reasoning)
-- 📚 **Internal Knowledge Base** (PDFs)
-- 🌐 **Web Search** (Google)
-- 🛡️ **Safety Guardrails** (Maker-Checker Loop)
+- **Planner & Memory** (Context-aware reasoning)
+- **Internal Knowledge Base** (PDFs)
+- **Web Search** (Google)
+- **Safety Guardrails** (Maker-Checker Loop)
 """)
 
 # Initialize Session State
@@ -64,13 +64,12 @@ for message in st.session_state.messages:
             st.markdown(message.content)
 
 
-# ✅ Async Live Streaming Function with Proper State Tracking
-async def stream_agent_live(initial_state, config, containers):
-    """Stream agent execution with real-time UI updates."""
+# Async Live Streaming with Dynamic Status
+async def stream_agent_live(initial_state, config, containers, status_placeholder):
+    """Stream agent execution with real-time status updates in spinner."""
     final_state = None
-    all_states = {}  # ✅ Track states from all nodes
+    all_states = {}
     
-    status_container = containers["status"]
     plan_container = containers["plan"]
     research_container = containers["research"]
     checker_container = containers["checker"]
@@ -78,15 +77,14 @@ async def stream_agent_live(initial_state, config, containers):
     try:
         async for event in st.session_state.agent.astream(initial_state, config=config):
             for key, value in event.items():
-                # ✅ Store state from each node
                 all_states[key] = value
                 final_state = value
                 
                 if key == "planner":
                     plan = value.get("plan", "")
                     
-                    with status_container:
-                        st.write("**📋 Status:** Planning research strategy...")
+                    # Update status in the spinner message
+                    status_placeholder.text("📋 Planning research strategy...")
                     
                     with plan_container:
                         st.success("✅ **Planning Complete**")
@@ -96,11 +94,11 @@ async def stream_agent_live(initial_state, config, containers):
                 elif key == "researcher":
                     iteration = value.get("iteration", 0)
                     
-                    with status_container:
-                        if iteration == 1:
-                            st.write("**🔬 Status:** Researching sources...")
-                        else:
-                            st.write(f"**🔬 Status:** Re-researching (iteration {iteration})...")
+                    # Update status in spinner
+                    if iteration == 1:
+                        status_placeholder.text("🔬 Researching sources...")
+                    else:
+                        status_placeholder.text(f"🔬 Re-researching (iteration {iteration})...")
                     
                     agent_steps = value.get("agent_steps", [])
                     
@@ -127,8 +125,8 @@ async def stream_agent_live(initial_state, config, containers):
                     critique = value.get("critique")
                     iteration = value.get("iteration", 0)
                     
-                    with status_container:
-                        st.write("**🛡️ Status:** Validating answer...")
+                    # Update status in spinner
+                    status_placeholder.text("🛡️ Validating answer...")
                     
                     with checker_container:
                         if valid_status == "VALID":
@@ -138,7 +136,9 @@ async def stream_agent_live(initial_state, config, containers):
                             with st.expander("📝 Checker Feedback", expanded=False):
                                 st.info(critique)
         
-        # ✅ Return all states to extract draft_answer
+        # Final status
+        status_placeholder.text("✅ Research complete!")
+        
         return all_states, final_state
     
     except Exception as e:
@@ -168,87 +168,82 @@ if query:
     # 3. Run Agent with Live Streaming
     with st.chat_message("assistant"):
         
-        # Create containers for live updates
-        status_container = st.empty()
-        
-        with st.container():
-            st.markdown("### 🤖 Agent Workflow")
-            plan_container = st.container()
-            research_container = st.container()
-            checker_container = st.container()
-        
-        st.divider()
-        
-        response_container = st.empty()
-        
-        # Prepare state with memory
-        initial_state: AgentState = {
-            "query": query,
-            "messages": st.session_state.messages.copy(),
-            "plan": "",
-            "retrieved_docs": [],
-            "draft_answer": "",
-            "critique": "",
-            "validation_status": "",
-            "iteration": 0,
-            "agent_steps": []
-        }
-        
-        config: RunnableConfig = {"configurable": {"thread_id": st.session_state.thread_id}}
-        
-        try:
-            # Prepare containers
-            containers = {
-                "status": status_container,
-                "plan": plan_container,
-                "research": research_container,
-                "checker": checker_container
+        # Single status display (in spinner placeholder)
+        with st.status("Initializing...", expanded=True) as status_widget:
+            status_text = st.empty()  # Dynamic status text
+            
+            # Workflow containers (no separate status display)
+            with st.container():
+                st.markdown("### Agent Workflow")
+                plan_container = st.container()
+                research_container = st.container()
+                checker_container = st.container()
+            
+            st.divider()
+            
+            response_container = st.empty()
+            
+            # Prepare state with memory
+            initial_state: AgentState = {
+                "query": query,
+                "messages": st.session_state.messages.copy(),
+                "plan": "",
+                "retrieved_docs": [],
+                "draft_answer": "",
+                "critique": "",
+                "validation_status": "",
+                "iteration": 0,
+                "agent_steps": []
             }
             
-            # ✅ Run async live streaming
-            with st.spinner("🤖 Agent working..."):
-                all_states, final_state = asyncio.run(
-                    stream_agent_live(initial_state, config, containers)
-                )
+            config: RunnableConfig = {"configurable": {"thread_id": st.session_state.thread_id}}
             
-            # Update final status
-            with status_container:
-                st.success("**✅ Complete!** Answer generated successfully.")
-            
-            # ✅ Extract draft_answer from the latest researcher state
-            final_answer = ""
-            
-            # Try to get from final_state first
-            if final_state and final_state.get("draft_answer"):
-                final_answer = final_state.get("draft_answer")
-            # If not in final state, look for it in researcher state
-            elif "researcher" in all_states:
-                final_answer = all_states["researcher"].get("draft_answer", "")
-            
-            # Ensure we have content
-            if not final_answer or final_answer.strip() == "":
-                final_answer = "⚠️ No answer generated. The agent completed but no draft was produced. Please try again."
-                logger.warning("No draft_answer found in any state")
-                logger.debug(f"All states keys: {all_states.keys()}")
-                logger.debug(f"Final state: {final_state}")
-            
-            with response_container:
-                st.markdown("### 📝 Final Answer")
-                st.markdown(final_answer)
-            
-            # ✅ Add assistant response to memory
-            st.session_state.messages.append(AIMessage(content=final_answer))
-            
-        except Exception as e:
-            st.error(f"❌ **Error:** {str(e)}")
-            logger.error(f"Agent execution error: {e}", exc_info=True)
-            
-            with response_container:
-                st.error("""
-                **Something went wrong during research.**
+            try:
+                # Prepare containers
+                containers = {
+                    "plan": plan_container,
+                    "research": research_container,
+                    "checker": checker_container
+                }
                 
-                Please try:
-                - Rephrasing your question
-                - Being more specific
-                - Checking your internet connection
-                """)
+                # Run async with dynamic status updates
+                all_states, final_state = asyncio.run(
+                    stream_agent_live(initial_state, config, containers, status_text)
+                )
+                
+                # Update status widget
+                status_widget.update(label="✅ Complete!", state="complete")
+                
+                # Extract final answer
+                final_answer = ""
+                
+                if final_state and final_state.get("draft_answer"):
+                    final_answer = final_state.get("draft_answer")
+                elif "researcher" in all_states:
+                    final_answer = all_states["researcher"].get("draft_answer", "")
+                
+                if not final_answer or final_answer.strip() == "":
+                    final_answer = "⚠️ No answer generated. Please try again."
+                    logger.warning("No draft_answer found in any state")
+                
+                with response_container:
+                    st.markdown("### 📝 Final Answer")
+                    st.markdown(final_answer)
+                
+                # Add to memory
+                st.session_state.messages.append(AIMessage(content=final_answer))
+                
+            except Exception as e:
+                status_widget.update(label="❌ Error occurred", state="error")
+                st.error(f"❌ **Error:** {str(e)}")
+                logger.error(f"Agent execution error: {e}", exc_info=True)
+                
+                with response_container:
+                    st.error("""
+                    **Something went wrong during research.**
+                    
+                    Please try:
+                    - Rephrasing your question
+                    - Being more specific
+                    - Checking your internet connection
+                    """)
